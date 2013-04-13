@@ -29,8 +29,6 @@ void testApp::setup(){
     //  Map
     //
     map.setup(new OpenStreetMapProvider(), (double)ofGetWidth(), (double)ofGetHeight());
-//    myLoc = Location(coreLocation->getLatitude(),coreLocation->getLatitude());
-//    map.setCenter(myLoc);
 	map.setZoom(5);
     
     //  Loads cities positions
@@ -39,7 +37,7 @@ void testApp::setup(){
         citiesPos.push_back( map.getLocation( dBase.getLatitud(i), dBase.getLongitud(i) ) );
     }
     
-    angle = 0;
+    angle   = 0;
     distance = 0;
     apperture = 30;
     
@@ -50,7 +48,17 @@ void testApp::setup(){
     areaZone.addVertex(point);
     
     graphView.init(10,10,301,142);
-    graphView.bEditMode = true;
+    graphView.bEditMode = false;
+
+    TotalPop    = 0.0f;
+    TotalBlack  = 0.0f;
+    TotalAsian  = 0.0f;
+    TotalLatino = 0.0f;
+    TotalND     = 0.0f;
+    TotalHS     = 0.0f;
+    TotalBA     = 0.0f;
+    
+    closerWellcomeCityIndex = -1;
 }
 
 //--------------------------------------------------------------
@@ -58,16 +66,18 @@ void testApp::update(){
     //  Update Compass
     //
     myLoc = Location(coreLocation->getLatitude(),coreLocation->getLongitude());
+    myPos = map.locationPoint(myLoc);
+    
     map.setCenter(myLoc);
     heading = ofLerpDegrees(heading, coreLocation->getTrueHeading(), 0.7);
     angle = heading+90+180;
-    distance = 100;
+    float accY = ofxAccelerometer.getForce().y * -1.0f ;
+    distance = ofLerp( distance, -(300.0f*ofMap(map.getZoom(),3,10,0.3,1.0,true)) * ((accY>0.0)?accY:0.0f), 0.1);
     
-    ofPoint point = map.locationPoint(myLoc);
     areaZone.clear();
-    areaZone.addVertex(point);
-    areaZone.arc(point, distance, distance, angle-apperture*0.5, angle+apperture*0.5, true,60);
-    areaZone.addVertex(point);
+    areaZone.addVertex(myPos);
+    areaZone.arc(myPos, distance, distance, angle-apperture*0.5, angle+apperture*0.5, true,60);
+    areaZone.addVertex(myPos);
     
     //  Map
     //
@@ -80,11 +90,20 @@ void testApp::update(){
     int tmpAsian = 0;
     int tmpLatino = 0;
     
-    int tmpUnEmp = 0.0f;
+    float tmpPctUnEmpND = 0.0f; // no degree
+    float tmpPctUnEmpHS = 0.0f; // highschool
+    float tmpPctUnEmpBA = 0.0f; // bachellor
     
+    float closerWellcomeCityDist = 1000.f;
     for (int i = 0; i < citiesPos.size(); i++){
+        
+        //  Update City position
+        //  ( this probably it's not need because the person it's not going to be moving so much )
+        //
         citiesPos[i] = map.getLocation( dBase.getLatitud(i), dBase.getLongitud(i) );
         
+        //  It's in the green zone?
+        //
         if (areaZone.inside( citiesPos[i] )){
             
             tmpPop += dBase.getNumVal(MPI_NUM_POPULATION, i);
@@ -93,22 +112,32 @@ void testApp::update(){
             tmpAsian += dBase.getNumVal(MPI_PCT_ETHNIC_ASIAN, i);
             tmpLatino += dBase.getNumVal(MPI_PCT_ETHNIC_LATINO, i);
             
-            tmpUnEmp += dBase.getNumVal(MPI_PCT_UNEMPLOYMENT, i);
+            tmpPctUnEmpND += dBase.getPctVal(MPI_PCT_UNEMPLOY_IMMIGRANTS_NO_DEGREE, i);
+            tmpPctUnEmpHS += dBase.getPctVal(MPI_PCT_UNEMPLOY_IMMIGRANTS_HIGHSCHOOL_DEGREE , i);
+            tmpPctUnEmpBA += dBase.getPctVal(MPI_PCT_UNEMPLOY_IMMIGRANTS_BA_DEGREE, i);
+        }
+        
+        //  It's this city active recruting?
+        //
+        if ( dBase.getCityCategory(i) == MPI_CITY_ACTIVE_RECRUITING ){
+            //  if so, ask if is the closest one
+            //
+            float dist = myPos.distance(citiesPos[i]);
+            if ( dist <= closerWellcomeCityDist  ){
+                closerWellcomeCityIndex = i;
+                closerWellcomeCityDist = dist;
+            }
         }
     }
     
     TotalPop = ofLerp(TotalPop, tmpPop, 0.1);
-    
     TotalBlack  = ofLerp(TotalBlack, tmpBlack, 0.1);
-    PctBlack    = (float)TotalBlack/(float)TotalPop;
     TotalAsian  = ofLerp(TotalAsian, tmpAsian, 0.1);
-    PctAsian    = (float)TotalAsian/(float)TotalPop;
     TotalLatino = ofLerp(TotalLatino, tmpLatino, 0.1);
-    PctLatino   = (float)TotalLatino/(float)TotalPop;
     
-    PctImm      = (float)(TotalBlack+TotalAsian+TotalLatino)/(float)TotalPop;
-    TotalUnEmploy = ofLerp(TotalUnEmploy, tmpUnEmp, 0.1);
-    PctUnEmploy = (float)TotalUnEmploy/(float)TotalPop;
+    TotalND     = ofLerp(TotalND, tmpPctUnEmpND, 0.1);
+    TotalHS     = ofLerp(TotalHS, tmpPctUnEmpHS, 0.1);
+    TotalBA     = ofLerp(TotalBA, tmpPctUnEmpBA, 0.1);
 }
 
 //--------------------------------------------------------------
@@ -117,9 +146,44 @@ void testApp::draw(){
     
     ofPushStyle();
     
+    //  Draw you position
+    //
     ofSetColor(0,200,0);
-    ofCircle( map.locationPoint(myLoc), map.getZoom() );
+    ofCircle( myPos, map.getZoom() );
     
+    //  Draw arrow to the closes actively recruiting city
+    //
+    if ( closerWellcomeCityIndex != -1 ){
+        ofPushStyle();
+        
+        ofSetLineWidth(2);
+        ofPoint diff = citiesPos[ closerWellcomeCityIndex ] - myPos;
+        float angleToCity = atan2(diff.y,diff.x);
+        float radioToCity = 30;
+        ofPoint arrowHead = myPos + ofPoint(radioToCity*cos(angleToCity),
+                                            radioToCity*sin(angleToCity));
+        
+        ofSetColor(0,0,255, 50+100*abs(sin(ofGetElapsedTimef())));
+        ofLine( myPos, arrowHead);
+        
+        ofPushMatrix();
+        ofTranslate(arrowHead);
+        ofRotate(ofRadToDeg(angleToCity)+90, 0, 0, 1.0);
+        ofFill();
+        
+        ofBeginShape();
+        ofVertex(0, 0);
+        ofVertex(5, 10);
+        ofVertex(-5, 10);
+        ofEndShape();
+        
+        ofPopMatrix();
+        
+        ofPopStyle();
+    }
+    
+    //  Draw pointing area zone
+    //
     ofSetColor(0,200,0,100);
     ofBeginShape();
     for(int i = 0; i < areaZone.size(); i++){
@@ -127,85 +191,103 @@ void testApp::draw(){
     }
     ofEndShape();
     
+    //  Draw cities position
+    //
     for (int i = 0; i < citiesPos.size(); i++){
         
         if (areaZone.inside( citiesPos[i] )){
             ofSetColor(0,50,0,200);
             ofDrawBitmapString(dBase.getCity(i), citiesPos[i] + ofPoint(10,5));
-            
             ofFill();
         } else {
             ofNoFill();
         }
         
-        ofSetColor(150,0,0,200);
+        ofColor cityColor = ofColor(255,0,0);
+        
+        if ( dBase.getCityCategory(i) == MPI_CITY_ACTIVE_RECRUITING ){
+            cityColor = ofColor(255*(1.0-abs(sin(ofGetElapsedTimef()))),0,255*abs(sin(ofGetElapsedTimef())));
+        }
+        
+        ofSetColor(cityColor,100);
         ofCircle(citiesPos[i], map.getZoom() * 2);
-        ofSetColor(200,0,0,200);
+        ofSetColor(cityColor,100);
         ofCircle(citiesPos[i], map.getZoom());
         
         ofFill();
-        ofSetColor(255,0,0,200);
+        ofSetColor(cityColor,100);
         ofCircle(citiesPos[i], 2);
         
     }
     
-    ofSetColor(0,180);
-    ofFill();
-    ofRect(graphView);
-    
     ofPushMatrix();
-    float pct = 0.7;
-    ofRectangle white = graphView;
-    white.width = graphView.width*pct;
-    white.height = graphView.height * (1.0-PctImm);
-    ofSetColor(255,50);
-    ofRect(white);
+
+    float pct       = 0.5;
+    float top       = 30;
     
+    float PctBlack    = (float)TotalBlack/(float)TotalPop;
     ofRectangle black = graphView;
     black.width = graphView.width*pct;
-    black.y = white.y + white.height;
+    black.y = top;
     black.height = graphView.height * PctBlack;
     ofSetColor(0,200,0,200);
     ofRect(black);
-    ofSetColor(255);
-    ofDrawBitmapString(ofToString( (int)(PctBlack*100) )+ "% african a.", black.x+5, black.y+15);
     
+    
+    float PctLatino   = (float)TotalLatino/(float)TotalPop;
     ofRectangle latin = graphView;
     latin.width = graphView.width*pct;
     latin.y = black.y + black.height;
     latin.height = graphView.height * PctLatino;
     ofSetColor(0,150,0,200);
     ofRect(latin);
-    ofSetColor(255);
-    ofDrawBitmapString(ofToString( (int)(PctLatino*100) )+ "% latin", latin.x+5, latin.y+15);
     
+    
+    
+    float PctAsian    = (float)TotalAsian/(float)TotalPop;
     ofRectangle asian = graphView;
     asian.width = graphView.width*pct;
     asian.y = latin.y + latin.height;
     asian.height = graphView.height * PctAsian;
     ofSetColor(0,100,0,200);
     ofRect(asian);
+    
+    ofRectangle unEmpND = graphView;
+    unEmpND.y = top;
+    unEmpND.width = graphView.width*(1.0-pct);
+    unEmpND.x += graphView.width*pct;
+    unEmpND.height = graphView.height * (TotalND*0.01);
+    ofSetColor(0,0,200,200);
+    ofRect(unEmpND);
     ofSetColor(255);
+    
+    ofRectangle unEmpHS = graphView;
+    unEmpHS.width = graphView.width*(1.0-pct);
+    unEmpHS.x += graphView.width*pct;
+    unEmpHS.y = unEmpND.y + unEmpND.height;
+    unEmpHS.height = graphView.height * (TotalHS*0.01);
+    ofSetColor(0,0,150,200);
+    ofRect(unEmpHS);
+    
+    ofRectangle unEmpBA = graphView;
+    unEmpBA.width = graphView.width*(1.0-pct);
+    unEmpBA.x += graphView.width*pct;
+    unEmpBA.y = unEmpHS.y + unEmpHS.height;
+    unEmpBA.height = graphView.height * (TotalBA*0.01);
+    ofSetColor(0,0,100,200);
+    ofRect(unEmpBA);
+    
+    ofSetColor(0);
+    ofDrawBitmapString("Community", 5, 15 );
+    ofDrawBitmapString("Imm. Unemploy.", unEmpND.x+5, 15 );
+
+    ofSetColor(255);
+    ofDrawBitmapString(ofToString( (int)(PctBlack*100) )+ "% african a.", black.x+5, black.y+15);
+    ofDrawBitmapString(ofToString( (int)(PctLatino*100) )+ "% latin", latin.x+5, latin.y+15);
     ofDrawBitmapString(ofToString( (int)(PctAsian*100) )+ "% asian", asian.x+5, asian.y+15);
-    
-    ofRectangle unEmp = graphView;
-    unEmp.width = graphView.width*(1.0-pct);
-    unEmp.x += graphView.width*pct;
-    unEmp.height = graphView.height * PctUnEmploy;
-    ofSetColor(255,50);
-    ofRect(unEmp);
-    
-    ofRectangle emp = graphView;
-    emp.width = graphView.width*(1.0-pct);
-    emp.x += graphView.width*pct;
-    emp.y = unEmp.y + unEmp.height;
-    emp.height = graphView.height * (1.0-PctUnEmploy);
-    ofSetColor(0,50,0,200);
-    ofRect(emp);
-    
-    ofSetColor(255);
-    ofDrawBitmapString(ofToString( (int)(PctUnEmploy*100)) + "%", unEmp.x+5, unEmp.y+15 );
-    ofDrawBitmapString("unEmp", unEmp.x+5, unEmp.y+30);
+    ofDrawBitmapString(ofToString( (int)(TotalND),0 )+ "% no deegre", unEmpND.x+5, unEmpND.y+15);
+    ofDrawBitmapString(ofToString( (int)(TotalHS),0 )+ "% highschool", unEmpHS.x+5, unEmpHS.y+15);
+    ofDrawBitmapString(ofToString( (int)(TotalBA),0 )+ "% BA", unEmpBA.x+5, unEmpBA.y+15);
     
     ofPopMatrix();
     
@@ -224,7 +306,7 @@ void testApp::touchDown(ofTouchEventArgs & touch){
 
 //--------------------------------------------------------------
 void testApp::touchMoved(ofTouchEventArgs & touch){
-
+    map.setZoom(ofMap(touch.y, 0, ofGetHeight(), 3, 10));
 }
 
 //--------------------------------------------------------------

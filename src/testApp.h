@@ -37,15 +37,17 @@ public:
     //  Compass and GPS
     //
     ofxiPhoneCoreLocation * coreLocation;
-    float heading;
-    bool hasCompass;
-    bool hasGPS;
+    float   heading;
+    bool    hasCompass;
+    bool    hasGPS;
     
     //  Map
     //
     Map         map;
     vector <ofPoint> citiesPos;
     Location    myLoc;
+    ofPoint     myPos;
+    
     float       angle;
     float       apperture;
     float       distance;
@@ -55,18 +57,17 @@ public:
     //
     MpiData     dBase;
     DragRect    graphView;
+    
+    float       TotalND;
+    float       TotalHS;
+    float       TotalBA;
+    
     int         TotalPop;
     int         TotalBlack;
-    float       PctBlack;
     int         TotalAsian;
-    float       PctAsian;
     int         TotalLatino;
-    float       PctLatino;
     
-    float       PctImm;
-    
-    int         TotalUnEmploy;
-    float       PctUnEmploy;
+    int         closerWellcomeCityIndex;
 };
 
 
